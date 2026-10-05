@@ -136,6 +136,15 @@ struct FFF_AudioCue
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
 	TArray<TSoftObjectPtr<USoundBase>> Variations;
 
+	/* 소리마다 재생을 시작할 위치(초). 표에 없는 소리는 처음부터 튼다.
+
+	   휘파람 뒤에 쾅이 오는 파일은 처음부터 틀면 화면에서 터지고 한참 뒤에 쾅이 난다.
+	   FierWorks_3 은 1.55초에 쾅이 있어 불꽃이 터진 뒤 1.5초가 지나서야 들렸다(2026-10-05 피드백
+	   "소리가 늦음"). 쾅 바로 앞 위치를 적으면 화면과 맞는다.
+	*/
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (DisplayName = "Start Seconds (소리별 시작 위치)"))
+	TMap<TSoftObjectPtr<USoundBase>, float> SoundStartSeconds;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
 	EFF_AudioChannel Channel = EFF_AudioChannel::Effects;
 

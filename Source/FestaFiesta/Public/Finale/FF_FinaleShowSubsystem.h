@@ -344,13 +344,20 @@ private:
 	*/
 	bool PrepareSiteTour();
 
-	// 순회 카메라를 경로 위 HeldSeconds 지점으로 옮긴다.
+	// 순회 카메라를 순회 자리에 머문 지 HeldSeconds 째 자리로 옮긴다. 날아 들어오는 동안은 출발점에 선다.
 	void UpdateSiteTourCamera(float HeldSeconds, bool bSnap);
 
-	// 이번 연출의 순회 설정과 경로.
+	// 이번 연출의 순회 설정과 경로. 시간은 날아 들어오는 시간을 뺀 순회 몫이다.
 	FFF_FinaleSiteTourSpec ActiveSiteTour;
 	FFF_FinaleSiteTourRoute SiteTourRoute;
 	float SiteTourSeconds = 0.f;
+
+	// 이번 경로의 카메라 높이 · 보는 지점에서 뒤로 떨어진 거리(cm). 빨리 날수록 둘 다 커진다.
+	float SiteTourHeight = 0.f;
+	float SiteTourTrail = 0.f;
+
+	// 카메라에서 보는 지점 쪽 수평 방향. 카메라는 이 반대쪽으로 물러선다. 경로가 꺾일 때 한 번에 돌지 않게 천천히 따라간다.
+	FVector SiteTourBoomDirection = FVector::ForwardVector;
 
 	// 경로를 따라 움직이는 순회 카메라. 한 번 만들어 연출마다 다시 쓴다.
 	UPROPERTY(Transient)

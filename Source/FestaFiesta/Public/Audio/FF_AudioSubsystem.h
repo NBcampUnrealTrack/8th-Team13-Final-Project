@@ -184,6 +184,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FestaFiesta|Audio")
 	int32 GetStartedAmbienceTrackCount() const { return StartedAmbienceTracks; }
 
+	// 배경음이 곡 중간에 끊겨 그 자리부터 다시 이은 횟수. 0 이 아니면 무언가 곡을 밀어낸 것이다(끊김 진단).
+	UFUNCTION(BlueprintPure, Category = "FestaFiesta|Audio")
+	int32 GetInterruptedAmbienceTrackCount() const { return InterruptedAmbienceTracks; }
+
+	/* 배경음이 끝났다는 알림이 곡 끝이 아니라 중간에서 왔는지.
+
+	   들은 시간이 곡 길이보다 ToleranceSeconds 넘게 모자라면 중간이다. 길이를 모르면(0) 끝으로 본다.
+	*/
+	static bool IsAmbienceCutShort(float PlayedSeconds, float TrackLengthSeconds, float ToleranceSeconds);
+
 	// 직접 지정한 뱅크. 비워두면 GameMode → Project Settings 순으로 찾는다.
 	UPROPERTY(BlueprintReadWrite, Category = "FestaFiesta|Audio")
 	TSoftObjectPtr<UFF_AudioBankData> BankOverride;
@@ -215,8 +225,13 @@ private:
 	   그 칸을 빠뜨려서 타이틀·준비 곡이 한 번 돌고 끊겼다(피드백). 배경음은 엔딩곡을
 	   빼면 전부 반복이 맞으므로 여기서 보장한다. 애셋이 이미 반복이면 끝나지 않아
 	   이 함수가 불리지 않는다.
+
+	   곡 끝이 아니라 중간에 끊긴 것이면(IsAmbienceCutShort) 처음이 아니라 끊긴 자리부터 잇는다.
 	*/
 	void HandleAmbienceFinished(UAudioComponent* Component);
+
+	// 지금 배경음을 들은 위치(초). 플레이리스트면 플레이리스트가 재는 위치다.
+	float GetAmbiencePlaybackSeconds() const;
 
 	// 지금 배경음을 페이드아웃 칸으로 옮긴다. 갈아탈 때와 플레이리스트 곡을 넘길 때 같이 쓴다.
 	void RetireAmbienceComponent(float FadeOutSeconds);
@@ -273,6 +288,11 @@ private:
 
 	FTimerHandle FadingCleanupTimer;
 
+	// 지금 배경음을 튼 순간의 오디오 시각 · 시작 위치 · 곡 길이(모르면 0). 끊겼을 때 이을 자리를 잰다.
+	double AmbienceStartAudioTime = 0.0;
+	float AmbienceStartOffset = 0.f;
+	float AmbienceLength = 0.f;
+
 	// ── 플레이리스트 상태 ──
 
 	// 재생 순서(뱅크 목록의 번호)와 그중 지금 위치.
@@ -311,6 +331,7 @@ private:
 	int32 MissingCues = 0;
 	int32 SuppressedCues = 0;
 	int32 StartedAmbienceTracks = 0;
+	int32 InterruptedAmbienceTracks = 0;
 
 	// 개발용 콘솔 명령. 이름 충돌·해제 규칙은 FFF_DebugConsoleCommands 가 맡는다.
 	FFF_DebugConsoleCommands DebugCommands;

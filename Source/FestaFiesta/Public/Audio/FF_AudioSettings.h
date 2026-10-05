@@ -35,9 +35,12 @@ public:
 	   실제 불꽃놀이는 빛이 먼저 보이고 쾅 소리가 뒤따른다. 소리는 초속 약 343m(20도 공기)라
 	   300m 밖에서 터지면 0.9초쯤 늦는다. 번쩍임과 소리가 같은 프레임에 나면 불꽃이
 	   코앞에서 터지는 것처럼 느껴져 바다 건너 멀리 있다는 거리감이 사라진다.
+
+	   기본은 끈다. 바지선을 수백 m 밖으로 펼친 뒤로는 지연이 1~3초가 되어 "소리가 늦다"로 들렸다
+	   (2026-10-05 피드백). 발사음은 이 설정과 상관없이 늘 바로 낸다 — 발사 번쩍임과 같이 들려야 한다.
 	*/
 	UPROPERTY(EditAnywhere, Config, BlueprintReadOnly, Category = "Audio|Finale")
-	bool bDelayFinaleBurstBySoundTravel = true;
+	bool bDelayFinaleBurstBySoundTravel = false;
 
 	// 소리 속도(cm/s). 20도 공기 기준 약 34300.
 	UPROPERTY(EditAnywhere, Config, BlueprintReadOnly, Category = "Audio|Finale",

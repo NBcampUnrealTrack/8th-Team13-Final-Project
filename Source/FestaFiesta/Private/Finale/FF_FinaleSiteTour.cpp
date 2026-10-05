@@ -128,22 +128,6 @@ void FFF_FinaleSiteTourRoute::BuildSamples()
 	}
 }
 
-FVector FFF_FinaleSiteTourRoute::NextStopAfter(const float Distance) const
-{
-	if (Stops.Num() == 0)
-	{
-		return FVector::ZeroVector;
-	}
-	for (int32 Index = 1; Index < Stops.Num(); ++Index)
-	{
-		if (StopDistances.IsValidIndex(Index) && StopDistances[Index] > Distance)
-		{
-			return Stops[Index];
-		}
-	}
-	return Stops.Last();
-}
-
 FVector FFF_FinaleSiteTourRoute::Evaluate(const float Distance) const
 {
 	if (Samples.Num() == 0)
@@ -178,4 +162,108 @@ FVector FFF_FinaleSiteTourRoute::Evaluate(const float Distance) const
 	const float Span = Cumulative[High] - Cumulative[Low];
 	const float Alpha = Span > KINDA_SMALL_NUMBER ? (Distance - Cumulative[Low]) / Span : 0.f;
 	return FMath::Lerp(Samples[Low], Samples[High], Alpha);
+}
+
+FVector FFF_FinaleSiteTourRoute::Extrapolate(const float Distance) const
+{
+	if (Samples.Num() < 2 || (Distance >= 0.f && Distance <= TotalLength))
+	{
+		return Evaluate(Distance);
+	}
+
+	// 끝 방향은 수평으로만 잡는다. 입구 바깥이 언덕이어도 카메라가 땅을 파고들지 않게 높이는 끝점을 따른다.
+	if (Distance < 0.f)
+	{
+		const FVector Direction = (Samples[1] - Samples[0]).GetSafeNormal2D();
+		return Samples[0] + Direction * Distance;
+	}
+	const FVector Direction = (Samples.Last() - Samples[Samples.Num() - 2]).GetSafeNormal2D();
+	return Samples.Last() + Direction * (Distance - TotalLength);
+}
+
+void FFF_FinaleSiteTourRoute::BuildTimeline(
+	const float SpeedCmPerSecond, const float StopSeconds, const float MinSeconds, const float MaxSeconds)
+{
+	StopTimes.Reset();
+	Duration = 0.f;
+	if (StopDistances.Num() == 0)
+	{
+		return;
+	}
+
+	// 구간마다 거리 몫과 시설 몫을 더한다.
+	const float Speed = FMath::Max(1.f, SpeedCmPerSecond);
+	const float PerStop = FMath::Max(0.f, StopSeconds);
+	StopTimes.Add(0.f);
+	for (int32 Index = 1; Index < StopDistances.Num(); ++Index)
+	{
+		const float Length = StopDistances[Index] - StopDistances[Index - 1];
+		StopTimes.Add(StopTimes.Last() + Length / Speed + PerStop);
+	}
+
+	// 합을 범위에 맞게 같은 비율로 늘이거나 줄인다. 시설마다 받은 몫의 비율은 그대로다.
+	const float Lower = FMath::Max(0.f, FMath::Min(MinSeconds, MaxSeconds));
+	const float Upper = FMath::Max(Lower, MaxSeconds);
+	const float Raw = StopTimes.Last();
+	const float Wanted = FMath::Clamp(Raw, Lower, Upper);
+	if (Raw > KINDA_SMALL_NUMBER)
+	{
+		const float Scale = Wanted / Raw;
+		for (float& Time : StopTimes)
+		{
+			Time *= Scale;
+		}
+	}
+	Duration = Wanted;
+}
+
+float FFF_FinaleSiteTourRoute::DistanceAt(const float Seconds) const
+{
+	if (StopTimes.Num() < 2 || Duration <= 0.f)
+	{
+		return Seconds > 0.f ? TotalLength : 0.f;
+	}
+	if (Seconds <= 0.f)
+	{
+		return 0.f;
+	}
+	if (Seconds >= Duration)
+	{
+		return TotalLength;
+	}
+
+	int32 Segment = 1;
+	while (Segment < StopTimes.Num() - 1 && StopTimes[Segment] < Seconds)
+	{
+		++Segment;
+	}
+
+	/* 구간 안에서는 경유지 근처에서 느리고 가운데서 빠르다.
+
+	   직선(일정한 속도)과 스무스스텝(양 끝에서 멈춤)을 섞는다. 완전히 멈추면 시설마다 툭툭 서서
+	   끊겨 보이고, 일정하면 시설을 그냥 스쳐 간다. 섞으면 경유지에서 평균의 30% 속도로 지난다.
+	*/
+	constexpr float SlowAtStops = 0.7f;
+	const float SegmentStart = StopTimes[Segment - 1];
+	const float SegmentTime = StopTimes[Segment] - SegmentStart;
+	const float Alpha = SegmentTime > KINDA_SMALL_NUMBER ? FMath::Clamp((Seconds - SegmentStart) / SegmentTime, 0.f, 1.f) : 1.f;
+	const float Eased = FMath::Lerp(Alpha, FMath::SmoothStep(0.f, 1.f, Alpha), SlowAtStops);
+	return FMath::Lerp(StopDistances[Segment - 1], StopDistances[Segment], Eased);
+}
+
+void FFF_FinaleSiteTourRoute::EvaluateView(
+	const float FocusDistance, const float TrailCm, const float HeightCm, FVector& OutEye, FVector& OutFocus) const
+{
+	OutFocus = Evaluate(FocusDistance);
+
+	// 경로를 거꾸로 거슬러 간 자리 쪽으로 물러선다. 굽은 길에서도 지나온 쪽 뒤에 선다.
+	const float Trail = FMath::Max(1.f, TrailCm);
+	FVector Ahead = (OutFocus - Extrapolate(FocusDistance - Trail)).GetSafeNormal2D();
+	if (Ahead.IsNearlyZero())
+	{
+		// 경로가 점 하나다(입구뿐). 아무 방향이나 같은 결과라 X 축으로 둔다.
+		Ahead = FVector::ForwardVector;
+	}
+
+	OutEye = OutFocus - Ahead * Trail + FVector(0.f, 0.f, FMath::Max(0.f, HeightCm));
 }

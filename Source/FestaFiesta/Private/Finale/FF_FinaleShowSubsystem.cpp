@@ -1784,10 +1784,23 @@ bool UFF_FinaleShowSubsystem::PrepareSiteTour()
 		SiteTourRoute = FFF_FinaleSiteTourRoute::Build(Entrance, { Inside }, ActiveSiteTour.ClusterCm, 1);
 	}
 
-	const float Speed = FMath::Max(100.f, ActiveSiteTour.SpeedCmPerSecond);
 	const float MinSeconds = FMath::Max(1.f, FMath::Min(ActiveSiteTour.MinSeconds, ActiveSiteTour.MaxSeconds));
 	const float MaxSeconds = FMath::Max(MinSeconds, ActiveSiteTour.MaxSeconds);
-	SiteTourSeconds = FMath::Clamp(SiteTourRoute.GetLength() / Speed, MinSeconds, MaxSeconds);
+	SiteTourRoute.BuildTimeline(
+		FMath::Max(100.f, ActiveSiteTour.SpeedCmPerSecond), ActiveSiteTour.StopSeconds, MinSeconds, MaxSeconds);
+	SiteTourSeconds = SiteTourRoute.GetDuration();
+
+	// 빠르게 날수록 높이 난다(HeightPerSpeedSeconds 주석). 뒤로 떨어진 거리도 같은 비율로 늘려 각도를 지킨다.
+	const float AverageSpeed = SiteTourSeconds > 0.f ? SiteTourRoute.GetLength() / SiteTourSeconds : 0.f;
+	const float BaseHeight = FMath::Max(200.f, ActiveSiteTour.HeightCm);
+	SiteTourHeight = FMath::Max(BaseHeight, AverageSpeed * ActiveSiteTour.HeightPerSpeedSeconds);
+	SiteTourTrail = FMath::Max(100.f, ActiveSiteTour.TrailCm) * (SiteTourHeight / BaseHeight);
+
+	UE_LOG(LogFestaFiestaFinale, Log,
+		TEXT("[피날레] 순회 경로: 입구 %s → 시설 묶음 %d곳(첫 곳까지 %.0fm) · 높이 %.0fm · 뒤로 %.0fm · 날아 들어옴 %.1f초 + 순회 %.1f초"),
+		*SiteTourRoute.Stops[0].ToCompactString(), SiteTourRoute.Stops.Num() - 1,
+		SiteTourRoute.GetStopDistance(1) / 100.f, SiteTourHeight / 100.f, SiteTourTrail / 100.f,
+		ActiveSiteTour.FlyInSeconds, SiteTourSeconds);
 
 	if (!SiteTourCamera)
 	{
@@ -1805,7 +1818,8 @@ bool UFF_FinaleShowSubsystem::PrepareSiteTour()
 		SiteTourCamera->FinishSpawning(FTransform(Entrance));
 	}
 
-	SiteTourCamera->TourHoldSeconds = SiteTourSeconds;
+	// 날아 들어오는 동안은 출발점에서 기다리므로 머무는 시간에 그만큼 더한다(UpdateSiteTourCamera).
+	SiteTourCamera->TourHoldSeconds = FMath::Max(0.f, ActiveSiteTour.FlyInSeconds) + SiteTourSeconds;
 	SiteTourCamera->TourBlendSeconds = FMath::Max(0.f, ActiveSiteTour.FlyInSeconds);
 	if (UCameraComponent* Camera = SiteTourCamera->GetViewCamera())
 	{
@@ -1824,39 +1838,37 @@ void UFF_FinaleShowSubsystem::UpdateSiteTourCamera(const float HeldSeconds, cons
 		return;
 	}
 
-	// 처음과 끝을 부드럽게 한다. 날아 들어오고 날아 나가는 블렌드와 이어지게 한다.
-	const float Alpha = SiteTourSeconds > 0.f ? FMath::Clamp(HeldSeconds / SiteTourSeconds, 0.f, 1.f) : 1.f;
-	const float Eased = FMath::InterpEaseInOut(0.f, 1.f, Alpha, 1.6f);
-	const float Length = SiteTourRoute.GetLength();
-	const float Distance = Length * Eased;
+	/* 날아 들어오는 동안(FlyInSeconds)은 출발점에 서서 입구를 본다. 블렌드가 끝난 뒤에 출발한다.
 
-	const FVector Ground = SiteTourRoute.Evaluate(Distance);
-
-	// 빠르게 날수록 높이 난다(HeightPerSpeedSeconds 주석).
-	const float Speed = SiteTourSeconds > 0.f ? Length / SiteTourSeconds : 0.f;
-	const float Height = FMath::Max(ActiveSiteTour.HeightCm, Speed * ActiveSiteTour.HeightPerSpeedSeconds);
-	const FVector Eye = Ground + FVector(0.f, 0.f, Height);
-
-	/* 다음에 지날 시설을 겨눈다. 아직 멀면 경로 앞쪽을 본다. 바로 위를 지나는 중이면
-	   시설이 화면 아래로 빠지므로 그다음 시설로 넘어간다.
+	   예전에는 블렌드 중에 이미 경로를 따라 움직여서, 화면이 순회 카메라에 닿을 때쯤엔 입구 옆 시설을
+	   지나친 뒤였다(2026-10-05 피드백 "입구쪽 건물이 짤림").
 	*/
-	const FVector NextStop = SiteTourRoute.NextStopAfter(Distance + Height * 0.5f);
-	FVector Target = FVector::Dist2D(NextStop, Ground) <= ActiveSiteTour.LookAheadCm
-		? NextStop
-		: SiteTourRoute.Evaluate(Distance + ActiveSiteTour.LookAheadCm);
-	if (FVector::Dist2D(Target, Ground) < Height * 0.5f)
-	{
-		// 경로 끝이거나 경로가 아주 짧다. 가던 방향으로 비스듬히 내려다본다.
-		const FVector Forward = (SiteTourRoute.Evaluate(Length) - SiteTourRoute.Evaluate(0.f)).GetSafeNormal2D();
-		Target = Ground + (Forward.IsNearlyZero() ? FVector::ForwardVector : Forward) * FMath::Max(Height, 2000.f);
-	}
+	const float RouteSeconds = HeldSeconds - FMath::Max(0.f, ActiveSiteTour.FlyInSeconds);
+	const float FocusDistance = SiteTourRoute.DistanceAt(RouteSeconds);
 
-	const FRotator Wanted = (Target - Eye).Rotation();
+	FVector Eye;
+	FVector Focus;
+	SiteTourRoute.EvaluateView(FocusDistance, SiteTourTrail, SiteTourHeight, Eye, Focus);
+
+	// 물러선 방향은 천천히 따라간다. 경로가 꺾이는 곳에서 카메라가 한 번에 휙 돌아가지 않는다.
+	const FVector WantedDirection = (Focus - Eye).GetSafeNormal2D();
 	const UWorld* World = GetWorld();
 	const float DeltaSeconds = World ? World->GetDeltaSeconds() : 0.f;
-	const FRotator Rotation = bSnap
-		? Wanted
-		: FMath::RInterpTo(SiteTourCamera->GetActorRotation(), Wanted, DeltaSeconds, 4.f);
+	if (bSnap || SiteTourBoomDirection.IsNearlyZero())
+	{
+		SiteTourBoomDirection = WantedDirection.IsNearlyZero() ? FVector::ForwardVector : WantedDirection;
+	}
+	else if (!WantedDirection.IsNearlyZero())
+	{
+		constexpr float BoomTurnDegreesPerSecond = 120.f;
+		SiteTourBoomDirection = FMath::VInterpNormalRotationTo(
+			SiteTourBoomDirection, WantedDirection, DeltaSeconds, BoomTurnDegreesPerSecond).GetSafeNormal2D();
+	}
 
+	Eye = Focus - SiteTourBoomDirection * SiteTourTrail + FVector(0.f, 0.f, SiteTourHeight);
+
+	// 땅이 아니라 시설 몸통쯤을 겨눈다. 바닥을 겨누면 건물 윗부분이 화면 위로 잘린다.
+	constexpr float AimAboveGroundCm = 400.f;
+	const FRotator Rotation = (Focus + FVector(0.f, 0.f, AimAboveGroundCm) - Eye).Rotation();
 	SiteTourCamera->SetActorLocationAndRotation(Eye, Rotation);
 }

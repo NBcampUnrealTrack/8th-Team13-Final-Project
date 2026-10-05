@@ -250,8 +250,15 @@ void UFF_AudioEventLink::HandleFinaleLaunch(const FVector LaunchLocation, const 
 		return;
 	}
 
-	// 바다 위 바지선에서 쿵. 뱅크에 소리가 없으면 조용히 넘어간다(오디오 서브시스템).
-	PlayFinaleEventWithTravelDelay(EFF_AudioEvent::FinaleLaunch, LaunchLocation);
+	/* 바다 위 바지선에서 쿵. 뱅크에 소리가 없으면 조용히 넘어간다(오디오 서브시스템).
+
+	   거리만큼 늦추지 않는다. 발사 번쩍임과 같이 들려야 발사 소리로 읽힌다 — 늦추면 화면의 무엇과도
+	   맞지 않는 소리가 된다(2026-10-05 피드백 "소리가 발사보다 늦음").
+	*/
+	if (UFF_AudioSubsystem* Audio = GetAudio())
+	{
+		Audio->PlayEventAtLocation(EFF_AudioEvent::FinaleLaunch, LaunchLocation);
+	}
 }
 
 void UFF_AudioEventLink::PlayFinaleEventWithTravelDelay(const EFF_AudioEvent Event, const FVector& WorldLocation)
