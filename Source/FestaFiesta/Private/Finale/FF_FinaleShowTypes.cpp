@@ -350,3 +350,45 @@ UNiagaraSystem* FFF_FinaleGradeSpec::PickEffect(const uint32 Seed) const
 
 	return nullptr;
 }
+
+float FFF_FinaleLaunchSpec::ResolveRiseSeconds(const float HeightCm) const
+{
+	// 높이의 제곱근에 비례한다(구조체 주석). 기준이 잘못 들어와도 0 으로 나누지 않게 묶는다.
+	const float Reference = FMath::Max(100.f, ReferenceHeightCm);
+	const float Seconds = FMath::Max(0.1f, ReferenceRiseSeconds)
+		* FMath::Sqrt(FMath::Max(0.f, HeightCm) / Reference);
+
+	const float Low = FMath::Max(0.1f, FMath::Min(MinRiseSeconds, MaxRiseSeconds));
+	const float High = FMath::Max(Low, FMath::Max(MinRiseSeconds, MaxRiseSeconds));
+	return FMath::Clamp(Seconds, Low, High);
+}
+
+FVector FFF_FinaleLaunchSpec::EvaluateRise(
+	const FVector& Start, const FVector& Target, const float Alpha, const float WobblePhase) const
+{
+	const float T = FMath::Clamp(Alpha, 0.f, 1.f);
+
+	/* 남은 비율의 거듭제곱으로 감속을 낸다. 1-(1-t)^k 는 t=0 에서 가장 빠르고 t=1 에서 멈춘다.
+
+	   k=2 가 중력만 받은 연직 투사와 같다. 수평을 덜 감속시키면 끝에서 수평으로 조금 흘러
+	   궤적이 눕는다(VerticalEase 주석).
+	*/
+	const float Vertical = 1.f - FMath::Pow(1.f - T, FMath::Max(1.f, VerticalEase));
+	const float Horizontal = 1.f - FMath::Pow(1.f - T, FMath::Max(1.f, HorizontalEase));
+
+	const FVector Delta = Target - Start;
+	FVector Location = Start + FVector(Delta.X * Horizontal, Delta.Y * Horizontal, Delta.Z * Vertical);
+
+	if (WobbleCm > 0.f)
+	{
+		/* 수평으로만 흔든다. 오르는 방향의 옆이 아니라 고정축(X·Y)에 두 번 다른 박자로 흔들어
+		   곧게 오르는 발도 흔들리게 한다. sin(πt) 를 곱해 양 끝에서 0 이 되게 한다.
+		*/
+		const float Envelope = FMath::Sin(PI * T);
+		const float SwayX = FMath::Sin(T * 2.f * PI * 1.3f + WobblePhase);
+		const float SwayY = FMath::Sin(T * 2.f * PI * 0.9f + WobblePhase * 1.7f);
+		Location += FVector(SwayX, SwayY, 0.f) * (WobbleCm * Envelope);
+	}
+
+	return Location;
+}

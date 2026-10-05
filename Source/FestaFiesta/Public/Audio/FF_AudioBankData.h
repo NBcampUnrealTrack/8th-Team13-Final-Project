@@ -33,8 +33,12 @@ public:
 	   곡의 Looping 은 꺼 둔다. 켜져 있으면 곡 길이만큼 지난 뒤 코드가 다음 곡으로 넘기지만,
 	   곡 끝이 정확히 맞지 않을 수 있다. 볼륨은 배경음 슬라이더를 따른다.
 	   비워두면 예전처럼 Ambiences 의 준비·낮·밤 곡을 쓴다.
+
+	   곡을 넣을 때 Display Name 에 플레이어에 보일 이름을 적는다(한글 그대로 된다). 애셋 이름은
+	   영문으로 두고 보이는 이름만 여기서 정한다 — 애셋 이름을 한글로 바꾸면 패키징·Git 에서 경로가
+	   깨질 수 있다. 목록의 줄 제목이 이 이름이라 어느 곡에 이름을 안 넣었는지 바로 보인다.
 	*/
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio|Playlist")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio|Playlist", meta = (TitleProperty = "DisplayName"))
 	TArray<FFF_AudioAmbienceTrack> FestivalPlaylist;
 
 	// 켜면 한 바퀴마다 순서를 섞는다. 바퀴가 바뀔 때 같은 곡이 연달아 나오지는 않는다.

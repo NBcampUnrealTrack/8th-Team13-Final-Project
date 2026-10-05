@@ -1,12 +1,13 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-// 역할: 플레이어만 시설에 부딪히고 일반 캐릭터는 통과하는지 실제 이동으로 검증한다.
+// 역할: 플레이어만 시설에 부딪히고 일반 캐릭터는 통과하는지 실제 이동으로 검증한다. 달리기 토글도 본다.
 
 #include "Character/FF_FestivalCharacter.h"
 
 #if WITH_EDITOR && WITH_DEV_AUTOMATION_TESTS
 
 #include "Components/CapsuleComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -113,6 +114,52 @@ bool FFF_FestivalCharacterFacilityCollisionTest::RunTest(const FString& Paramete
 	TestFalse(TEXT("The same mesh does not block an ordinary character"), OtherHit.bBlockingHit);
 	TestTrue(TEXT("Ordinary character completes the same swept distance"),
 		FMath::IsNearlyEqual(OtherCapsule->GetComponentLocation().X, 250.0, 0.1));
+	return true;
+}
+
+// 달리기 토글. 누를 때마다 켜고 끄며, 이동 속도가 상태를 따라간다.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FFF_FestivalCharacterSprintToggleTest,
+	"FestaFiesta.Character.Sprint.ToggleFollowsState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFF_FestivalCharacterSprintToggleTest::RunTest(const FString& Parameters)
+{
+	FTestWorldWrapper Fixture;
+	if (!Fixture.CreateTestWorld(EWorldType::Game))
+	{
+		Fixture.ForwardErrorMessages(this);
+		return false;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AFF_FestivalCharacter* Player = Fixture.GetTestWorld()->SpawnActor<AFF_FestivalCharacter>(
+		AFF_FestivalCharacter::StaticClass(), FVector(0.0, 0.0, 100.0), FRotator::ZeroRotator, SpawnParameters);
+	if (!TestNotNull(TEXT("캐릭터"), Player))
+	{
+		return false;
+	}
+
+	const UCharacterMovementComponent* Movement = Player->GetCharacterMovement();
+	TestTrue(TEXT("기본은 토글 방식"), Player->bToggleSprint);
+	TestTrue(TEXT("달리기 속도가 걷기보다 빠르다"), Player->SprintSpeed > Player->WalkSpeed);
+	TestFalse(TEXT("처음에는 걷는다"), Player->IsSprinting());
+
+	// 두 번 뒤집으면 제자리로 돌아오고, 매번 속도가 상태를 따라간다.
+	for (int32 Press = 1; Press <= 4; ++Press)
+	{
+		Player->ToggleSprint();
+		const bool bExpectSprint = Press % 2 == 1;
+		TestEqual(*FString::Printf(TEXT("%d번 누른 뒤 달리기 상태"), Press), Player->IsSprinting(), bExpectSprint);
+		TestEqual(*FString::Printf(TEXT("%d번 누른 뒤 속도"), Press), Movement->MaxWalkSpeed,
+			bExpectSprint ? Player->SprintSpeed : Player->WalkSpeed);
+	}
+
+	// 같은 값을 다시 걸어도 상태가 뒤집히지 않는다.
+	Player->SetSprinting(true);
+	Player->SetSprinting(true);
+	TestTrue(TEXT("켠 채로 다시 켜도 달린다"), Player->IsSprinting());
 	return true;
 }
 

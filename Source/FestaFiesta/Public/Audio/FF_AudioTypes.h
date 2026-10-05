@@ -29,6 +29,9 @@ enum class EFF_AudioEvent : uint8
 	FinaleShowStarted = 11  UMETA(DisplayName = "피날레 - 연출 시작"),
 	FinaleShowEnded = 12    UMETA(DisplayName = "피날레 - 연출 종료"),
 
+	// 바지선 발사통에서 알을 쏘아 올리는 쿵 소리. 발사 자리에서 나고, 소리가 날아오는 만큼 늦게 들린다.
+	FinaleLaunch = 13       UMETA(DisplayName = "피날레 - 발사"),
+
 	// ── 대기열 ──────────────────────────────────────────────────────────────
 	QueueJoined = 30        UMETA(DisplayName = "대기열 - 줄 서기"),
 	QueueRejected = 31      UMETA(DisplayName = "대기열 - 가입 거절"),
@@ -65,12 +68,18 @@ enum class EFF_AudioAmbience : uint8
 	Setup           UMETA(DisplayName = "준비 - 개장 전"),
 	DayLive         UMETA(DisplayName = "축제 - 낮"),
 	NightLive       UMETA(DisplayName = "축제 - 밤"),
-	Finale          UMETA(DisplayName = "피날레"),
+	// A 등급 이하 피날레 곡. S 등급은 아래 전용곡을 쓴다.
+	Finale          UMETA(DisplayName = "피날레 (A등급 이하)"),
 	Closing         UMETA(DisplayName = "정리 - 폐장"),
 
-	// 최고 등급 3막 연출의 엔딩곡. 축제장 순회부터 끝까지 흐른다. 반복 재생을 끈 곡을 넣는다.
-	// 맨 뒤에 붙인 이유는 뱅크가 이 값을 키로 저장해서, 중간에 끼우면 뒤의 곡이 한 칸씩 밀리기 때문이다.
-	FinaleEnding    UMETA(DisplayName = "피날레 - 엔딩곡"),
+	/* S 등급 피날레 전용곡. S 불꽃이 시작될 때부터 연출이 끝날 때까지 이 곡 하나로 흐른다.
+	   A 등급 이하는 피날레 곡(Finale)을 쓴다. 카메라 순회 여부와 상관없이 등급으로만 가른다.
+
+	   예전에는 3막의 축제장 순회로 넘어갈 때 피날레 곡에서 이 곡으로 갈아타 곡이 끊겼다(2026-10-05 피드백).
+	   비워 두면 S 도 피날레 곡을 쓴다. 맨 뒤에 붙인 이유는 뱅크가 이 값을 키로 저장해서,
+	   중간에 끼우면 뒤의 곡이 한 칸씩 밀리기 때문이다(이름은 예전 그대로 둔다).
+	*/
+	FinaleEnding    UMETA(DisplayName = "피날레 - S등급 전용곡"),
 
 	// 로비(프론트엔드 레벨: 타이틀, 지구본, 국가 지도) 전용 곡. 개장 전 곡과 따로 둔다.
 	// 예전에는 로비에서도 축제 단계가 기본값(준비)이라 개장 전 곡이 흘러, 로비와 축제 준비가
@@ -166,8 +175,12 @@ struct FFF_AudioAmbienceTrack
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
 	TSoftObjectPtr<USoundBase> Sound;
 
-	// 플레이리스트 플레이어에 보일 곡 이름. 비워두면 사운드 애셋 이름에서 만든다(밑줄은 공백으로).
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+	/* 플레이리스트 플레이어에 보일 곡 이름. 한글을 그대로 적으면 된다.
+
+	   비워두면 사운드 애셋 이름에서 만든다(밑줄은 공백으로). 애셋 이름은 영문이라 한글 제목은
+	   여기에 적어야 나온다.
+	*/
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (DisplayName = "Display Name (곡 이름)"))
 	FText DisplayName;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (ClampMin = "0.0", ClampMax = "4.0"))

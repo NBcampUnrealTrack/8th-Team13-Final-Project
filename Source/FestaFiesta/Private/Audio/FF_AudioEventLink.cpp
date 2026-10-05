@@ -10,6 +10,7 @@
 #include "Engine/World.h"
 #include "Building/FF_BuildModeSubsystem.h"
 #include "FF_FFZSWorldSubsystem.h"
+#include "Festival/FF_FestivalProgressionSubsystem.h"
 #include "Finale/FF_FinaleShowSubsystem.h"
 #include "Queue/FF_QueueSubsystem.h"
 #include "Time/FF_FestivalStageSubsystem.h"
@@ -101,7 +102,7 @@ void UFF_AudioEventLink::BindAll()
 		{
 			Finale->OnBurst.AddDynamic(this, &UFF_AudioEventLink::HandleFinaleBurst);
 			Finale->OnShowStateChanged.AddDynamic(this, &UFF_AudioEventLink::HandleFinaleShowStateChanged);
-			Finale->OnTourActChanged.AddDynamic(this, &UFF_AudioEventLink::HandleFinaleTourActChanged);
+			Finale->OnLaunch.AddDynamic(this, &UFF_AudioEventLink::HandleFinaleLaunch);
 			bBoundFinale = true;
 		}
 	}
@@ -178,7 +179,7 @@ void UFF_AudioEventLink::UnbindAll()
 		{
 			Finale->OnBurst.RemoveDynamic(this, &UFF_AudioEventLink::HandleFinaleBurst);
 			Finale->OnShowStateChanged.RemoveDynamic(this, &UFF_AudioEventLink::HandleFinaleShowStateChanged);
-			Finale->OnTourActChanged.RemoveDynamic(this, &UFF_AudioEventLink::HandleFinaleTourActChanged);
+			Finale->OnLaunch.RemoveDynamic(this, &UFF_AudioEventLink::HandleFinaleLaunch);
 		}
 		bBoundFinale = false;
 	}
@@ -236,13 +237,32 @@ void UFF_AudioEventLink::HandleFinaleBurst(const FVector WorldLocation, const FL
 	}
 
 	// 터진 자리에서 소리를 낸다. 멀리서 터지면 작게 들려야 거리감이 산다.
+	PlayFinaleEventWithTravelDelay(EFF_AudioEvent::FinaleBurst, WorldLocation);
+}
+
+void UFF_AudioEventLink::HandleFinaleLaunch(const FVector LaunchLocation, const FVector BurstLocation, const float RiseSeconds)
+{
+	(void)BurstLocation;
+	(void)RiseSeconds;
+
+	if (!bLinkEnabled)
+	{
+		return;
+	}
+
+	// 바다 위 바지선에서 쿵. 뱅크에 소리가 없으면 조용히 넘어간다(오디오 서브시스템).
+	PlayFinaleEventWithTravelDelay(EFF_AudioEvent::FinaleLaunch, LaunchLocation);
+}
+
+void UFF_AudioEventLink::PlayFinaleEventWithTravelDelay(const EFF_AudioEvent Event, const FVector& WorldLocation)
+{
 	UWorld* World = GetWorld();
 	const float Delay = ResolveBurstSoundDelay(WorldLocation);
 	if (!World || Delay <= 0.02f)
 	{
 		if (UFF_AudioSubsystem* Audio = GetAudio())
 		{
-			Audio->PlayEventAtLocation(EFF_AudioEvent::FinaleBurst, WorldLocation);
+			Audio->PlayEventAtLocation(Event, WorldLocation);
 		}
 		return;
 	}
@@ -254,7 +274,7 @@ void UFF_AudioEventLink::HandleFinaleBurst(const FVector WorldLocation, const FL
 	*/
 	FTimerHandle Handle;
 	World->GetTimerManager().SetTimer(Handle,
-		FTimerDelegate::CreateWeakLambda(this, [this, WorldLocation]()
+		FTimerDelegate::CreateWeakLambda(this, [this, Event, WorldLocation]()
 		{
 			if (!bLinkEnabled)
 			{
@@ -262,7 +282,7 @@ void UFF_AudioEventLink::HandleFinaleBurst(const FVector WorldLocation, const FL
 			}
 			if (UFF_AudioSubsystem* Audio = GetAudio())
 			{
-				Audio->PlayEventAtLocation(EFF_AudioEvent::FinaleBurst, WorldLocation);
+				Audio->PlayEventAtLocation(Event, WorldLocation);
 			}
 		}),
 		Delay, false);
@@ -310,43 +330,45 @@ void UFF_AudioEventLink::HandleFinaleShowStateChanged(const bool bInProgress)
 
 	if (bInProgress)
 	{
+		// 등급은 연출이 시작 신호를 보내기 전에 정해져 있다(UFF_FinaleShowSubsystem::StartShowWithGrade).
 		Audio->PlayEvent2D(EFF_AudioEvent::FinaleShowStarted);
-		Audio->SetAmbience(EFF_AudioAmbience::Finale);
+		Audio->SetAmbience(ResolveFinaleAmbience(*Audio));
 		return;
 	}
 
 	Audio->PlayEvent2D(EFF_AudioEvent::FinaleShowEnded);
 
 	// 연출이 끝나면 배경음을 되돌린다. 어느 단계로 갈지는 진행 쪽이 알고 있으므로
-	// 여기서는 피날레 곡만 걷어내고 다음 요청을 기다린다.
+	// 여기서는 피날레 곡만 걷어내고 결산 곡을 건다. 폐장 곡이 없으면 플레이리스트로 돌아간다.
 	if (IsFinaleAmbience(Audio->GetCurrentAmbience()))
 	{
-		Audio->SetAmbience(EFF_AudioAmbience::Closing);
+		Audio->SetAmbience(ResolveStageAmbience(EFF_FestivalStage::Closing, bLastIsNight,
+			Audio->HasPlaylist(), Audio->HasAmbienceTrack(EFF_AudioAmbience::Closing)));
 	}
 }
 
-void UFF_AudioEventLink::HandleFinaleTourActChanged(const EFF_FinaleTourAct NewAct)
+EFF_AudioAmbience UFF_AudioEventLink::ResolveShowAmbience(const EFF_FinaleGrade Grade, const bool bHasDedicatedTrack)
 {
-	// 불꽃 관람 막은 피날레 곡 그대로 둔다. 엔딩곡은 축제장 순회에서 시작해 끝까지 간다.
-	// 마무리 막에서도 거는 이유는 카메라를 건너뛰면 순회 없이 바로 마무리로 오기 때문이다.
-	if (!bLinkEnabled || NewAct == EFF_FinaleTourAct::Fireworks)
+	return (Grade == EFF_FinaleGrade::S && bHasDedicatedTrack) ? EFF_AudioAmbience::FinaleEnding : EFF_AudioAmbience::Finale;
+}
+
+EFF_AudioAmbience UFF_AudioEventLink::ResolveFinaleAmbience(const UFF_AudioSubsystem& Audio) const
+{
+	EFF_FinaleGrade Grade = EFF_FinaleGrade::None;
+	const UWorld* World = GetWorld();
+	const UFF_FinaleShowSubsystem* Finale = World ? World->GetSubsystem<UFF_FinaleShowSubsystem>() : nullptr;
+	if (Finale && Finale->IsShowInProgress())
 	{
-		return;
+		Grade = Finale->GetActiveGrade();
+	}
+	else if (const UFF_FestivalProgressionSubsystem* Progression = World && World->GetGameInstance()
+		? World->GetGameInstance()->GetSubsystem<UFF_FestivalProgressionSubsystem>()
+		: nullptr)
+	{
+		Grade = Progression->GetPurchasedFinaleGrade();
 	}
 
-	UFF_AudioSubsystem* Audio = GetAudio();
-	if (!Audio)
-	{
-		return;
-	}
-
-	// 엔딩곡이 아직 뱅크에 없으면 피날레 곡을 그대로 둔다. 갈아타면 순회 내내 무음이 된다.
-	if (!Audio->HasAmbienceTrack(EFF_AudioAmbience::FinaleEnding))
-	{
-		return;
-	}
-
-	Audio->SetAmbience(EFF_AudioAmbience::FinaleEnding);
+	return ResolveShowAmbience(Grade, Audio.HasAmbienceTrack(EFF_AudioAmbience::FinaleEnding));
 }
 
 bool UFF_AudioEventLink::IsFinaleAmbience(const EFF_AudioAmbience Ambience)
@@ -516,49 +538,67 @@ void UFF_AudioEventLink::RefreshAmbience()
 		return;
 	}
 
+	const bool bHasClosingTrack = Audio->HasAmbienceTrack(EFF_AudioAmbience::Closing);
+	if (!bHasClosingTrack && !bWarnedMissingClosingTrack
+		&& (LastStage == EFF_FestivalStage::Closing || LastStage == EFF_FestivalStage::Report))
+	{
+		// 비워 둔 것이 의도일 수 있어 경고가 아니라 기록으로 한 번만 남긴다.
+		bWarnedMissingClosingTrack = true;
+		UE_LOG(LogFestaFiestaAudio, Log,
+			TEXT("[사운드] 폐장 곡이 뱅크에 없어 결산 동안 플레이리스트를 이어 튼다. 따로 틀 곡이 있으면 배경음에 `정리 - 폐장` 을 넣을 것."));
+	}
+
+	Next = ResolveStageAmbience(LastStage, bLastIsNight, Audio->HasPlaylist(), bHasClosingTrack);
+
+	// 피날레 단계는 등급으로 곡을 가른다(S 는 전용곡). 연출 시작 신호와 같은 곡이어야 처음이 안 섞인다.
+	if (Next == EFF_AudioAmbience::Finale)
+	{
+		Next = ResolveFinaleAmbience(*Audio);
+	}
+	Audio->SetAmbience(Next);
+}
+
+EFF_AudioAmbience UFF_AudioEventLink::ResolveStageAmbience(
+	const EFF_FestivalStage Stage, const bool bIsNight, const bool bHasPlaylist, const bool bHasClosingTrack)
+{
 	/* 준비·운영은 플레이리스트 하나로 흐른다.
 
 	   예전에는 준비·낮·밤마다 곡이 갈렸는데, 낮밤이 빠르게 바뀌어 곡이 자주 끊겼다(피드백).
 	   같은 곡을 다시 요청하면 무시되므로 단계나 밤낮이 바뀌어도 듣던 곡이 이어진다.
 	   플레이리스트가 비어 있으면 예전 규칙으로 간다.
 	*/
-	const bool bUsePlaylist = Audio->HasPlaylist();
-
-	switch (LastStage)
+	switch (Stage)
 	{
 	case EFF_FestivalStage::Setup:
 	case EFF_FestivalStage::MorningCheck:
 	case EFF_FestivalStage::PromotionPreview:
-		Next = bUsePlaylist ? EFF_AudioAmbience::Playlist : EFF_AudioAmbience::Setup;
-		break;
+		return bHasPlaylist ? EFF_AudioAmbience::Playlist : EFF_AudioAmbience::Setup;
 
 	case EFF_FestivalStage::Live:
 	case EFF_FestivalStage::SunsetTransition:
 		// 플레이리스트가 없으면 밤낮으로 갈린다(예전 규칙).
-		if (bUsePlaylist)
+		if (bHasPlaylist)
 		{
-			Next = EFF_AudioAmbience::Playlist;
+			return EFF_AudioAmbience::Playlist;
 		}
-		else
-		{
-			Next = bLastIsNight ? EFF_AudioAmbience::NightLive : EFF_AudioAmbience::DayLive;
-		}
-		break;
+		return bIsNight ? EFF_AudioAmbience::NightLive : EFF_AudioAmbience::DayLive;
 
 	case EFF_FestivalStage::Finale:
-		Next = EFF_AudioAmbience::Finale;
-		break;
+		return EFF_AudioAmbience::Finale;
 
 	case EFF_FestivalStage::Closing:
 	case EFF_FestivalStage::Report:
-		Next = EFF_AudioAmbience::Closing;
-		break;
+		// 폐장 곡이 있으면 그 곡. 없으면 듣던 플레이리스트를 끊지 않는다.
+		// 둘 다 없으면 예전처럼 폐장으로 간다(지금 곡만 꺼진다).
+		if (!bHasClosingTrack && bHasPlaylist)
+		{
+			return EFF_AudioAmbience::Playlist;
+		}
+		return EFF_AudioAmbience::Closing;
 
 	default:
-		break;
+		return EFF_AudioAmbience::None;
 	}
-
-	Audio->SetAmbience(Next);
 }
 
 EFF_AudioAmbience UFF_AudioEventLink::ResolveLobbyAmbience(const UFF_AudioSubsystem& Audio) const

@@ -180,6 +180,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FestaFiesta|Audio")
 	int32 GetSuppressedCueCount() const { return SuppressedCues; }
 
+	// 배경음 곡을 새로 튼 횟수. 같은 곡으로 이름만 바뀔 때는 늘지 않는다(끊김 진단).
+	UFUNCTION(BlueprintPure, Category = "FestaFiesta|Audio")
+	int32 GetStartedAmbienceTrackCount() const { return StartedAmbienceTracks; }
+
 	// 직접 지정한 뱅크. 비워두면 GameMode → Project Settings 순으로 찾는다.
 	UPROPERTY(BlueprintReadWrite, Category = "FestaFiesta|Audio")
 	TSoftObjectPtr<UFF_AudioBankData> BankOverride;
@@ -306,6 +310,7 @@ private:
 	int32 PlayedCues = 0;
 	int32 MissingCues = 0;
 	int32 SuppressedCues = 0;
+	int32 StartedAmbienceTracks = 0;
 
 	// 개발용 콘솔 명령. 이름 충돌·해제 규칙은 FFF_DebugConsoleCommands 가 맡는다.
 	FFF_DebugConsoleCommands DebugCommands;

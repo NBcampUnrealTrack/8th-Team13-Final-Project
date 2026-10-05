@@ -226,9 +226,8 @@ void AFF_FestivalCharacter::UnPossessed()
 	// 관찰 시점으로 돌아갈 때 캐릭터 키를 남겨두면 WASD 가 양쪽에 다 먹는다.
 	RemoveMappingContext();
 
-	// 달리던 중에 빙의가 빠지면 상태가 남는다.
-	bSprinting = false;
-	ApplyMovementSpeed();
+	// 달리던 중에 빙의가 빠지면 상태가 남는다. 토글이라 다시 조종할 때 저절로 달리고 있으면 놀란다.
+	SetSprinting(false);
 
 	Super::UnPossessed();
 }
@@ -260,6 +259,7 @@ void AFF_FestivalCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 	}
 	if (SprintAction)
 	{
+		// 토글이든 누르는 동안이든 둘 다 묶는다. 어느 쪽으로 동작할지는 핸들러가 bToggleSprint 로 가른다.
 		EnhancedInput->BindAction(SprintAction, ETriggerEvent::Started, this, &AFF_FestivalCharacter::HandleSprintStarted);
 		EnhancedInput->BindAction(SprintAction, ETriggerEvent::Completed, this, &AFF_FestivalCharacter::HandleSprintCompleted);
 	}
@@ -350,12 +350,34 @@ void AFF_FestivalCharacter::HandleJumpCompleted(const FInputActionValue& Value)
 
 void AFF_FestivalCharacter::HandleSprintStarted(const FInputActionValue& Value)
 {
-	bSprinting = true;
-	ApplyMovementSpeed();
+	// 토글이면 누를 때마다 뒤집는다. 아니면 누르는 순간 켠다.
+	if (bToggleSprint)
+	{
+		ToggleSprint();
+		return;
+	}
+	SetSprinting(true);
 }
 
 void AFF_FestivalCharacter::HandleSprintCompleted(const FInputActionValue& Value)
 {
-	bSprinting = false;
+	// 토글이면 손을 떼도 그대로 달린다. 다음에 누를 때 끈다.
+	if (!bToggleSprint)
+	{
+		SetSprinting(false);
+	}
+}
+
+void AFF_FestivalCharacter::SetSprinting(const bool bEnabled)
+{
+	if (bSprinting == bEnabled)
+	{
+		return;
+	}
+
+	bSprinting = bEnabled;
 	ApplyMovementSpeed();
+
+	UE_LOG(LogFestaFiestaCamera, Verbose,
+		TEXT("[캐릭터] 달리기 %s"), bEnabled ? TEXT("켬") : TEXT("끔"));
 }

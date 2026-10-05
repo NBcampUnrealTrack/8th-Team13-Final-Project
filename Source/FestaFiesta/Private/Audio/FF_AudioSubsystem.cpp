@@ -239,6 +239,22 @@ void UFF_AudioSubsystem::SetAmbience(const EFF_AudioAmbience Ambience)
 
 	const UFF_AudioBankData* Bank = ResolveBank();
 
+	/* 이름만 다르고 같은 곡이면 끊지 않고 이름만 바꾼다.
+
+	   뱅크에서 피날레 곡과 최고 등급 전용곡에 같은 곡을 넣어 두었더니, 둘 사이를 오갈 때마다
+	   곡이 처음부터 다시 시작해 끊겼다(2026-10-05 피드백). 플레이리스트는 곡 목록이라 여기서 다루지 않는다.
+	*/
+	if (Bank && Ambience != EFF_AudioAmbience::Playlist && CurrentAmbience != EFF_AudioAmbience::Playlist)
+	{
+		const FFF_AudioAmbienceTrack* Playing = FindActiveTrack(Bank);
+		const FFF_AudioAmbienceTrack* Next = Bank->FindAmbience(Ambience);
+		if (Playing && Next && Playing->IsValid() && Next->Sound == Playing->Sound)
+		{
+			CurrentAmbience = Ambience;
+			return;
+		}
+	}
+
 	// 플레이리스트를 떠나면 들은 자리를 남긴다. 돌아오면 거기서 잇는다.
 	// 멈춰 둔 상태는 풀어 둔다. 다음에 돌아왔을 때 소리가 안 나면 고장으로 보인다.
 	const bool bLeavingPlaylist = CurrentAmbience == EFF_AudioAmbience::Playlist;
@@ -329,6 +345,7 @@ void UFF_AudioSubsystem::SpawnAmbienceComponent(
 	   0.5 로 두면 0.25 로 들렸다. 볼륨을 한 곳에 모아야 설정이 바뀌었을 때 그 값만 다시 걸 수 있다.
 	*/
 	AmbienceTrackVolume = Track.VolumeMultiplier;
+	++StartedAmbienceTracks;
 	AmbienceComponent = UGameplayStatics::SpawnSound2D(
 		World, Sound, AmbienceTrackVolume * GetChannelVolume(EFF_AudioChannel::Music),
 		1.f, StartSeconds, nullptr, true, false);
@@ -811,12 +828,8 @@ void UFF_AudioSubsystem::HandleAmbienceFinished(UAudioComponent* Component)
 		return;
 	}
 
-	// 엔딩곡은 한 번만 흐른다. 연출이 끝나기 전에 곡이 끝나도 되풀이하면 끝났다는 느낌이 사라진다.
-	if (CurrentAmbience == EFF_AudioAmbience::FinaleEnding)
-	{
-		return;
-	}
-
+	// 최고 등급 전용곡도 연출이 끝날 때까지 되풀이한다. 곡이 연출보다 짧아도 끝까지 조용해지지 않는다.
+	// 연출이 끝나면 오디오 결선이 다음 곡으로 갈아탄다(UFF_AudioEventLink::HandleFinaleShowStateChanged).
 	Component->Play(0.f);
 }
 
@@ -856,6 +869,7 @@ EFF_AudioChannel UFF_AudioSubsystem::ResolveChannel(const EFF_AudioEvent Event, 
 	switch (Event)
 	{
 	case EFF_AudioEvent::FinaleBurst:
+	case EFF_AudioEvent::FinaleLaunch:
 	case EFF_AudioEvent::FinaleShowStarted:
 	case EFF_AudioEvent::FinaleShowEnded:
 		return EFF_AudioChannel::Fireworks;

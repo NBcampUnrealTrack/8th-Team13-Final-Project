@@ -99,6 +99,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FestaFiesta|Character")
 	bool IsSprinting() const { return bSprinting; }
 
+	// 달리기를 켜고 끈다. 입력 말고 다른 곳(UI·연출)에서 걷기로 돌려놓을 때도 쓴다.
+	UFUNCTION(BlueprintCallable, Category = "FestaFiesta|Character")
+	void SetSprinting(bool bEnabled);
+
+	// 달리기를 뒤집는다. 토글 입력이 부른다.
+	UFUNCTION(BlueprintCallable, Category = "FestaFiesta|Character")
+	void ToggleSprint() { SetSprinting(!bSprinting); }
+
 	// ── 입력 자산 ────────────────────────────────────────────────────────────
 	// 비어 있으면 그 동작만 조용히 빠진다. 하나 안 넣었다고 캐릭터가 죽으면 곤란하다.
 
@@ -121,9 +129,20 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "FestaFiesta|Input")
 	TObjectPtr<UInputAction> JumpAction;
 
-	// Digital. 누르는 동안 달린다.
+	/* Digital. 누를 때마다 달리기를 켜고 끈다(bToggleSprint).
+
+	   키는 코드에 두지 않는다. IMC_Character 에 이 액션과 키를 넣으면 된다.
+	   LeftShift 는 시야 고정(ShiftLockAction)이 쓰고 있어 겹치지 않게 고른다.
+	*/
 	UPROPERTY(EditDefaultsOnly, Category = "FestaFiesta|Input")
 	TObjectPtr<UInputAction> SprintAction;
+
+	/* 켜면 누를 때마다 달리기를 켜고 끈다. 끄면 누르는 동안만 달린다(예전 동작).
+
+	   축제장은 넓어서 오래 달리는 일이 많다. 누르고 있게 하면 이동 키와 함께 손가락이 묶인다.
+	*/
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FestaFiesta|Input")
+	bool bToggleSprint = true;
 
 	/* 시야 고정 전환. 로블록스의 시프트락과 같은 동작이다.
 

@@ -43,17 +43,46 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FestaFiesta|Audio")
 	bool IsLinkEnabled() const { return bLinkEnabled; }
 
+	/* 축제 레벨에서 단계·밤낮·뱅크에 든 곡으로 틀 배경음을 정한다. 월드 없이 시험하려고 값만 받는다.
+
+	   결산(마감·리포트)은 뱅크에 폐장 곡이 있으면 그 곡, 없으면 플레이리스트를 이어 튼다.
+	   예전에는 폐장 곡이 없어도 폐장으로 갈아타서 듣던 곡만 꺼졌다. 플레이리스트로 합치며 뱅크의
+	   준비·낮·밤·폐장 곡을 비웠더니 결산 화면부터 다음 날 아침까지 조용했다(피드백).
+	   None 이면 지금 곡을 끈다는 뜻이다.
+	*/
+	static EFF_AudioAmbience ResolveStageAmbience(
+		EFF_FestivalStage Stage, bool bIsNight, bool bHasPlaylist, bool bHasClosingTrack);
+
+	/* 피날레 곡. S 등급이고 전용곡이 있으면 전용곡, 아니면(A 등급 이하) 피날레 곡.
+
+	   연출 도중에는 바꾸지 않는다. 카메라가 순회하든 건너뛰든 끝날 때까지 같은 곡이다.
+	*/
+	static EFF_AudioAmbience ResolveShowAmbience(EFF_FinaleGrade Grade, bool bHasDedicatedTrack);
+
 private:
 	UFUNCTION()
 	void HandleFinaleBurst(FVector WorldLocation, FLinearColor Color);
 
+	// 바지선에서 쏘아 올릴 때. 발사 자리에서 쿵 소리를 낸다. 터지는 소리와 같이 날아오는 시간만큼 늦춘다.
+	UFUNCTION()
+	void HandleFinaleLaunch(FVector LaunchLocation, FVector BurstLocation, float RiseSeconds);
+
+	// 그 자리에서 나는 소리를 날아오는 시간만큼 늦게 낸다. 터짐·발사가 같이 쓴다.
+	void PlayFinaleEventWithTravelDelay(EFF_AudioEvent Event, const FVector& WorldLocation);
+
 	UFUNCTION()
 	void HandleFinaleShowStateChanged(bool bInProgress);
 
-	UFUNCTION()
-	void HandleFinaleTourActChanged(EFF_FinaleTourAct NewAct);
 
-	// 피날레 곡이 걸려 있는지. 엔딩곡도 피날레 곡이다. 단계 신호가 덮어쓰면 안 된다.
+	/* 지금 피날레에 걸 곡. 연출 중이면 그 등급, 시작 전이면 구매한 등급으로 고른다.
+
+	   피날레 단계에 들어서는 순간 단계 신호와 연출 시작 신호가 같은 프레임에 온다. 단계 쪽이
+	   먼저 A 등급 이하 곡을 걸었다가 S 곡으로 갈아타면 첫 2초가 섞여 들린다. 그래서 단계 쪽도
+	   구매한 등급을 보고 처음부터 같은 곡을 건다.
+	*/
+	EFF_AudioAmbience ResolveFinaleAmbience(const UFF_AudioSubsystem& Audio) const;
+
+	// 피날레 곡이 걸려 있는지. S 전용곡도 피날레 곡이다. 단계 신호가 덮어쓰면 안 된다.
 	static bool IsFinaleAmbience(EFF_AudioAmbience Ambience);
 
 	UFUNCTION()
@@ -118,7 +147,7 @@ private:
 
 	UFF_AudioSubsystem* GetAudio() const;
 
-	// 불꽃 소리가 듣는 자리까지 오는 데 걸리는 시간. 설정이 꺼져 있으면 0.
+	// 불꽃 소리가 듣는 자리까지 오는 데 걸리는 시간. 설정이 꺼져 있으면 0. 발사음도 같이 쓴다.
 	float ResolveBurstSoundDelay(const FVector& WorldLocation) const;
 
 	bool bLinkEnabled = true;
@@ -134,6 +163,9 @@ private:
 	// 로비 곡이 뱅크에 없다는 것을 한 번만 알린다.
 	// 곡을 고르는 const 함수에서 남기므로 mutable 이다.
 	mutable bool bWarnedMissingLobbyTrack = false;
+
+	// 폐장 곡이 없어 결산 동안 플레이리스트를 잇는다는 것을 한 번만 남긴다.
+	bool bWarnedMissingClosingTrack = false;
 
 	// 로비 화면 확인 주기.
 	FTimerHandle FrontendScreenPollTimer;

@@ -14,6 +14,7 @@
 
 class AFF_FinaleViewpoint;
 class AFF_FinaleLaunchSite;
+class AFF_FinaleShellTracer;
 class AFF_FestivalPlayerController;
 
 // 연출 진행 상태가 바뀔 때. UI 가 표시를 바꾸거나 다른 시스템이 멈출 때 쓴다.
@@ -24,6 +25,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FFF_OnFinaleBurst, FVector, WorldLo
 
 // 3막 연출에서 막이 바뀔 때. 엔딩곡처럼 막에 맞춰 바뀌어야 하는 것을 여기에 건다.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FFF_OnFinaleTourActChanged, EFF_FinaleTourAct, NewAct);
+
+// 바지선에서 한 발 쏘아 올릴 때. 발사음(쿵)은 여기에 건다. RiseSeconds 뒤에 BurstLocation 에서 OnBurst 가 온다.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FFF_OnFinaleLaunch, FVector, LaunchLocation, FVector, BurstLocation, float, RiseSeconds);
 
 // 피날레 불꽃 연출을 실행한다.
 //
@@ -63,6 +67,14 @@ public:
 	// 지금까지 몇 발 터졌는지. 0 에서 안 올라가면 발사가 안 되고 있는 것이다.
 	UFUNCTION(BlueprintPure, Category = "FestaFiesta|Finale")
 	int32 GetFiredBurstCount() const { return FiredBursts; }
+
+	// 지금까지 바지선에서 쏘아 올린 알 수. 오르는 중인 알도 센다. 모양 알은 여러 발을 품어도 하나다.
+	UFUNCTION(BlueprintPure, Category = "FestaFiesta|Finale")
+	int32 GetLaunchedShellCount() const { return LaunchedShells; }
+
+	// 지금 오르는 중인 발수. 모양 알 하나는 품은 발을 전부 센다(터지면 그만큼 피어난다).
+	UFUNCTION(BlueprintPure, Category = "FestaFiesta|Finale")
+	int32 GetShellsInFlight() const { return InFlightBurstCount; }
 
 	UFUNCTION(BlueprintPure, Category = "FestaFiesta|Finale")
 	float GetElapsedSeconds() const { return ElapsedSeconds; }
@@ -106,6 +118,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "FestaFiesta|Finale")
 	FFF_OnFinaleTourActChanged OnTourActChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "FestaFiesta|Finale")
+	FFF_OnFinaleLaunch OnLaunch;
 
 	// 등급별 수치를 직접 지정한다. 보통은 비워두고 GameMode 나 Project Settings 를 쓴다.
 	//
@@ -220,10 +235,52 @@ private:
 	*/
 	const FFF_FinaleVolley& PickVolley(int32 RemainingShells) const;
 
-	// 한 발을 실제로 띄운다. 패턴이 정한 자리든 흩뿌린 자리든 여기로 모인다.
+	// 한 발을 실제로 터뜨린다. 패턴이 정한 자리든 흩뿌린 자리든 여기로 모인다.
 	// SizeScale 은 등급 크기에 곱한다. 높이에 따른 구경 차이를 여기로 넘긴다.
 	void SpawnShell(const FVector& Location, const FLinearColor& Color, class UNiagaraSystem* Effect,
 		float SizeScale = 1.f);
+
+	/* 한 발을 Origin(바지선)에서 쏘아 올린다. RiseSeconds 뒤에 Location 에서 터진다(SpawnShell).
+
+	   RiseSeconds 가 0 이하면 터질 높이로 상승 시간을 낸다. 모양 패턴은 차례 전체에 같은 시간을
+	   넘긴다 — 발마다 높이가 달라 시간이 갈리면 하트가 한꺼번에 피지 않는다.
+	   발사가 꺼져 있으면(FFF_FinaleLaunchSpec::bLaunchFromSite) 바로 터뜨린다.
+	*/
+	void LaunchShell(const FVector& Origin, const FVector& Location, const FLinearColor& Color,
+		class UNiagaraSystem* Effect, float SizeScale, float RiseSeconds = 0.f);
+
+	// 오르는 알이 터질 때 피는 불꽃 하나.
+	struct FShellBurst
+	{
+		FVector Location = FVector::ZeroVector;
+		FLinearColor Color = FLinearColor::White;
+		TWeakObjectPtr<class UNiagaraSystem> Effect;
+		float SizeScale = 1.f;
+	};
+
+	/* 알 하나를 Target 까지 쏘아 올리고, 다 오르면 Bursts 를 한꺼번에 터뜨린다.
+
+	   하트·원처럼 한 순간에 피는 모양은 실제로 알 하나가 터지며 그린다(모양 불꽃). 예전처럼
+	   발마다 따로 쏘아 올리면 알 열몇 개가 다발로 올라가 해파리처럼 보였다(2026-10-05 화면 확인).
+	   한 발짜리는 Bursts 가 하나다.
+	*/
+	void LaunchCarrier(const FVector& Origin, const FVector& Target, TArray<FShellBurst>&& Bursts,
+		const FLinearColor& Color, float RiseSeconds);
+
+	// 오르는 발을 옮기고, 다 오른 발을 터뜨린다. 터뜨리다 연출이 멈추면 false.
+	bool TickInFlightShells(float DeltaTime);
+
+	// 지금 켜진 번쩍임 빛의 수. 동시 조명 상한을 지킨다.
+	int32 CountActiveFlashLights() const;
+
+	// 이번 연출의 발사 방식. 데이터 애셋이 없으면 구조체 기본값(시간·궤적만, 모습 없음)이다.
+	FFF_FinaleLaunchSpec ResolveLaunchSpec() const;
+
+	/* 레벨에 발사 지점·연출 시점이 없으면 데이터의 기본 배치로 세운다(FFF_FinaleLayoutLaunchSite 주석).
+
+	   레벨에 놓은 액터가 있으면 그 종류는 손대지 않는다. 한 월드에서 한 번만 세운다.
+	*/
+	void EnsureFallbackLayout();
 
 	// 아직 쏘지도 예약하지도 않은 발수. 연출의 끝을 이것으로 정한다.
 	int32 GetRemainingShells() const;
@@ -234,7 +291,15 @@ private:
 	// 지연 발사 대기열. 일렬이나 부챗살은 한 프레임에 다 쏘지 않는다.
 	struct FPendingShell
 	{
+		// 터질 자리.
 		FVector Location = FVector::ZeroVector;
+
+		// 쏘아 올릴 바지선 자리.
+		FVector Origin = FVector::ZeroVector;
+
+		// 상승 시간. 0 이하면 쏠 때 높이로 낸다(LaunchShell).
+		float RiseSeconds = 0.f;
+
 		FLinearColor Color = FLinearColor::White;
 		float DelayRemaining = 0.f;
 
@@ -248,6 +313,48 @@ private:
 	};
 
 	TArray<FPendingShell> PendingShells;
+
+	// 쏘아 올려 오르는 중인 알. 다 오르면 품은 불꽃을 터뜨린다.
+	struct FInFlightShell
+	{
+		FVector Origin = FVector::ZeroVector;
+		FVector Target = FVector::ZeroVector;
+		TArray<FShellBurst> Bursts;
+		float RiseSeconds = 1.f;
+		float Elapsed = 0.f;
+		float WobblePhase = 0.f;
+		TWeakObjectPtr<AFF_FinaleShellTracer> Tracer;
+	};
+
+	TArray<FInFlightShell> InFlightShells;
+
+	// 오르는 알들이 품은 발수의 합. 남은 발수·막의 몫을 셀 때 이것을 뺀다.
+	int32 InFlightBurstCount = 0;
+
+	// 이번 연출의 발사 방식. 시작할 때 한 번 정한다.
+	FFF_FinaleLaunchSpec ActiveLaunch;
+
+	// 이 월드에서 기본 배치를 이미 세웠는지.
+	bool bFallbackLayoutApplied = false;
+
+	/* 축제장 순회 경로를 만든다. 입구(손님이 들어오는 게이트)와 설치된 시설을 읽는다.
+
+	   만들었으면 순회 카메라를 경로 시작에 놓고 true. 입구도 시설도 없으면 false 이고,
+	   그때는 레벨·데이터의 고정 순회 자리를 쓴다(FFF_FinaleSiteTourSpec 주석).
+	*/
+	bool PrepareSiteTour();
+
+	// 순회 카메라를 경로 위 HeldSeconds 지점으로 옮긴다.
+	void UpdateSiteTourCamera(float HeldSeconds, bool bSnap);
+
+	// 이번 연출의 순회 설정과 경로.
+	FFF_FinaleSiteTourSpec ActiveSiteTour;
+	FFF_FinaleSiteTourRoute SiteTourRoute;
+	float SiteTourSeconds = 0.f;
+
+	// 경로를 따라 움직이는 순회 카메라. 한 번 만들어 연출마다 다시 쓴다.
+	UPROPERTY(Transient)
+	TObjectPtr<AFF_FinaleViewpoint> SiteTourCamera;
 
 	// 이번 연출에서 돌 시점들. 하나뿐이면 고정 연출이다.
 	UPROPERTY(Transient)
@@ -328,6 +435,7 @@ private:
 	float NextVolleyAt = 0.f;
 	int32 FiredBursts = 0;
 	int32 FiredVolleys = 0;
+	int32 LaunchedShells = 0;
 
 	// 마지막 발 이후 여운 시간. 음수면 아직 발사가 안 끝난 것이다.
 	float TailStartedAt = -1.f;
